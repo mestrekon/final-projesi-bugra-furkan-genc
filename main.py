@@ -3,7 +3,8 @@ import os
 import socket
 import subprocess
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QTextEdit, QLineEdit, QPushButton, QLabel, QListWidget, QCheckBox, QFrame, QMessageBox)
+                             QTextEdit, QLineEdit, QPushButton, QLabel, QListWidget, QCheckBox, 
+                             QFrame, QMessageBox, QDialog, QProgressBar)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from pypdf import PdfReader
 from pptx import Presentation
@@ -18,7 +19,126 @@ def internet_var_mi():
     except OSError:
         return False
 
-# --- Arka Plan İşçisi (Donmayı Engeller) ---
+# --- Arka Planda Canlı İndirme İşçisi ---
+class ModelIndirmeIscisi(QThread):
+    ilerleme = pyqtSignal(int)
+    durum_mesaji = pyqtSignal(str)
+    tamamlandi = pyqtSignal()
+    hata = pyqtSignal(str)
+
+    def run(self):
+        try:
+            for yanit in ollama.pull('qwen2.5:7b', stream=True):
+                durum = yanit.get('status', '')
+                self.durum_mesaji.emit(durum)
+                
+                if 'total' in yanit and 'completed' in yanit:
+                    if yanit['total'] > 0:
+                        yuzde = int((yanit['completed'] / yanit['total']) * 100)
+                        self.ilerleme.emit(yuzde)
+            
+            self.ilerleme.emit(100)
+            self.durum_mesaji.emit("✅ İndirme Tamamlandı!")
+            self.tamamlandi.emit()
+        except Exception as e:
+            self.hata.emit(f"Hata: İndirme başarısız oldu. Ağ bağlantınızı kontrol edin.\nDetay: {str(e)}")
+
+# --- Başlangıç Kontrol Kutusu (Sihirbaz) ---
+class BaslangicSihirbazi(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Sistem Kontrolü")
+        self.setFixedSize(450, 200)
+        self.setWindowFlags(Qt.Dialog | Qt.CustomizeWindowHint | Qt.WindowTitleHint) 
+        self.setModal(True)
+        self.setStyleSheet("""
+            QDialog { background-color: #1a1d24; border: 2px solid #333; border-radius: 10px; }
+            QLabel { color: white; font-size: 14px; font-family: 'Segoe UI'; }
+            QProgressBar { border: 1px solid #333; border-radius: 5px; text-align: center; color: white; background-color: #0b0c10; height: 25px;}
+            QProgressBar::chunk { background-color: #0078D7; width: 20px; }
+            QPushButton { padding: 10px; border-radius: 5px; font-weight: bold; font-family: 'Segoe UI'; }
+            QPushButton#BtnMavi { background-color: #0078D7; color: white; }
+            QPushButton#BtnMavi:hover { background-color: #005a9e; }
+            QPushButton#BtnYesil { background-color: #2e7d32; color: white; }
+            QPushButton#BtnYesil:hover { background-color: #1b5e20; }
+            QPushButton:disabled { background-color: #333; color: #777; }
+        """)
+
+        layout = QVBoxLayout(self)
+        
+        self.bilgi_etiketi = QLabel("Sistem donanımları ve yapay zeka modelleri taranıyor...")
+        self.bilgi_etiketi.setWordWrap(True)
+        self.bilgi_etiketi.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.bilgi_etiketi)
+
+        self.durum_etiketi = QLabel("")
+        self.durum_etiketi.setStyleSheet("color: #aaa; font-style: italic; font-size: 12px;")
+        self.durum_etiketi.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.durum_etiketi)
+
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setValue(0)
+        self.progress_bar.hide() 
+        layout.addWidget(self.progress_bar)
+
+        self.btn_aksiyon = QPushButton("Bekleniyor...")
+        self.btn_aksiyon.setObjectName("BtnMavi")
+        layout.addWidget(self.btn_aksiyon)
+
+        self.modeli_denetle()
+
+    def modeli_denetle(self):
+        try:
+            sonuc = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=True)
+            if "qwen2.5:7b" in sonuc.stdout:
+                self.bilgi_etiketi.setText("✅ Qwen 2.5 (Yerel Zeka) sistemi hazır ve aktif.")
+                self.bilgi_etiketi.setStyleSheet("color: #4caf50; font-weight: bold; font-size: 15px;")
+                self.btn_aksiyon.setText("Devam")
+                self.btn_aksiyon.setObjectName("BtnYesil")
+                self.btn_aksiyon.clicked.connect(self.accept) 
+            else:
+                self.bilgi_etiketi.setText("⚠️ Qwen 2.5 (4.7 GB) yerel modeli bulunamadı.\nÇevrimdışı çalışabilmek için modelin indirilmesi gerekiyor.")
+                self.bilgi_etiketi.setStyleSheet("color: #ff9800; font-weight: bold;")
+                self.btn_aksiyon.setText("İndir ve Kur")
+                self.btn_aksiyon.setObjectName("BtnMavi")
+                self.btn_aksiyon.clicked.connect(self.indirmeyi_baslat)
+        except Exception:
+            self.bilgi_etiketi.setText("❌ Sistemde 'Ollama' uygulaması bulunamadı!\nCihazınızda Ollama kurulu değilse sadece Çevrimiçi Mod çalışır.")
+            self.bilgi_etiketi.setStyleSheet("color: #f44336; font-weight: bold;")
+            self.btn_aksiyon.setText("Çevrimiçi Modla Devam Et")
+            self.btn_aksiyon.setObjectName("BtnMavi")
+            self.btn_aksiyon.clicked.connect(self.accept)
+
+    def indirmeyi_baslat(self):
+        self.btn_aksiyon.setEnabled(False)
+        self.btn_aksiyon.setText("İndiriliyor, Uygulamayı Kapatmayın...")
+        self.progress_bar.show()
+        
+        self.isci = ModelIndirmeIscisi()
+        self.isci.ilerleme.connect(self.progress_bar.setValue)
+        self.isci.durum_mesaji.connect(self.durum_etiketi.setText)
+        self.isci.tamamlandi.connect(self.indirme_bitti)
+        self.isci.hata.connect(self.hata_olustu)
+        self.isci.start()
+
+    def indirme_bitti(self):
+        self.bilgi_etiketi.setText("✅ Kurulum Başarılı! Sistem kullanıma hazır.")
+        self.bilgi_etiketi.setStyleSheet("color: #4caf50; font-weight: bold;")
+        self.durum_etiketi.setText("")
+        self.btn_aksiyon.setEnabled(True)
+        self.btn_aksiyon.setText("Devam")
+        self.btn_aksiyon.setObjectName("BtnYesil")
+        self.btn_aksiyon.disconnect() 
+        self.btn_aksiyon.clicked.connect(self.accept)
+
+    def hata_olustu(self, hata_mesaji):
+        self.btn_aksiyon.setEnabled(True)
+        self.btn_aksiyon.setText("Yeniden Dene")
+        self.durum_etiketi.setText(hata_mesaji)
+        self.durum_etiketi.setStyleSheet("color: #f44336;")
+
+
+# --- Sohbet İşçisi ---
 class YapayZekaIscisi(QThread):
     yanit_geldi = pyqtSignal(str, str)
 
@@ -34,10 +154,8 @@ class YapayZekaIscisi(QThread):
         sistem_talimati = f"Sen cihaz üzerinde çalışan gizlilik odaklı kurumsal bir asistansın. Verilen BELGELER dışında bilgi kullanma.\n\nBELGELER:\n{sinirli_metin}"
         used_model = "Yerel Model (Qwen2.5:7b)"
         
-        # Eğer kullanıcı bulut modunu seçtiyse ve bir API anahtarı girdiyse
         if self.openai_zorla and self.api_key and internet_var_mi():
             try:
-                # Akıllı API Yönlendirmesi (Groq mu, OpenAI mı?)
                 if self.api_key.startswith("gsk_"):
                     client = OpenAI(api_key=self.api_key, base_url="https://api.groq.com/openai/v1")
                     model_secimi = "llama3-8b-8192"
@@ -57,10 +175,9 @@ class YapayZekaIscisi(QThread):
                 )
                 self.yanit_geldi.emit(response.choices[0].message.content, used_model)
                 return
-            except Exception as e:
+            except Exception:
                 used_model = "Yerel Model (Qwen2.5) - Fallback"
 
-        # Bulut başarısız olursa veya seçilmediyse Yerel Modele (Ollama) dön
         try:
             cevap = ollama.chat(model='qwen2.5:7b', messages=[
                 {'role': 'system', 'content': sistem_talimati},
@@ -68,7 +185,7 @@ class YapayZekaIscisi(QThread):
             ], options={'temperature': 0.1, 'num_predict': 300, 'num_ctx': 4096})
             self.yanit_geldi.emit(cevap['message']['content'], used_model)
         except Exception as e:
-            self.yanit_geldi.emit(f"❌ Hata: Yerel model çalıştırılamadı. Modelin inmesini bekleyin veya geçerli bir API anahtarı ile çevrimiçi modu açın. Detay: {str(e)}", "Hata")
+            self.yanit_geldi.emit(f"❌ Hata: Yerel model çalıştırılamadı.", "Hata")
 
 
 # --- Ana Uygulama ---
@@ -83,7 +200,26 @@ class YerelAsistanApp(QMainWindow):
 
         self.arayuzu_kur()
         self.temayi_guncelle()
-        self.model_kontrol_et()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.baslangic_ekranini_goster()
+
+    def baslangic_ekranini_goster(self):
+        self.overlay = QWidget(self)
+        self.overlay.setStyleSheet("background-color: rgba(0, 0, 0, 190);")
+        self.overlay.resize(self.size())
+        self.overlay.show()
+
+        self.dialog = BaslangicSihirbazi(self)
+        self.dialog.exec_()
+
+        self.overlay.hide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'overlay') and self.overlay.isVisible():
+            self.overlay.resize(self.size())
 
     def arayuzu_kur(self):
         merkez_widget = QWidget()
@@ -92,7 +228,6 @@ class YerelAsistanApp(QMainWindow):
         ana_layout.setContentsMargins(15, 15, 15, 15)
         ana_layout.setSpacing(15)
 
-        # ----------------- SOL PANEL -----------------
         self.sol_panel = QFrame()
         self.sol_panel.setObjectName("Panel")
         self.sol_panel.setFixedWidth(280)
@@ -109,13 +244,11 @@ class YerelAsistanApp(QMainWindow):
         self.dosya_listesi = QListWidget()
         self.dosya_listesi.setObjectName("DosyaListesi")
 
-        # --- YENİ EKLENEN API KUTUSU ---
         api_baslik = QLabel("🔑 Bulut API Anahtarı (Opsiyonel)")
         api_baslik.setStyleSheet("font-size: 13px; font-weight: bold; margin-top: 10px;")
         self.api_girdisi = QLineEdit()
         self.api_girdisi.setPlaceholderText("sk-... veya gsk_...")
-        self.api_girdisi.setEchoMode(QLineEdit.Password) # Güvenlik için yazılanları yıldızlı gösterir
-        self.api_girdisi.setToolTip("OpenAI veya Groq API anahtarınızı buraya girebilirsiniz.")
+        self.api_girdisi.setEchoMode(QLineEdit.Password) 
 
         self.btn_belge_temizle = QPushButton("🗑️ Belgeleri Temizle")
         self.btn_belge_temizle.setObjectName("BtnKirmizi")
@@ -129,7 +262,6 @@ class YerelAsistanApp(QMainWindow):
         self.btn_tema_degistir.setObjectName("BtnGri")
         self.btn_tema_degistir.clicked.connect(self.tema_degistir)
 
-        # Sol panel öğelerini yerleştir
         sol_layout.addWidget(belgeler_baslik)
         sol_layout.addWidget(self.dosya_etiket)
         sol_layout.addWidget(self.dosya_listesi)
@@ -141,7 +273,6 @@ class YerelAsistanApp(QMainWindow):
         sol_layout.addWidget(self.btn_tema_degistir)
         ana_layout.addWidget(self.sol_panel)
 
-        # ----------------- SAĞ PANEL -----------------
         self.sag_panel = QFrame()
         self.sag_panel.setObjectName("Panel")
         sag_layout = QVBoxLayout(self.sag_panel)
@@ -182,33 +313,6 @@ class YerelAsistanApp(QMainWindow):
         sag_layout.addLayout(girdi_layout)
 
         ana_layout.addWidget(self.sag_panel)
-
-    def model_kontrol_et(self):
-        try:
-            sonuc = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=True)
-            if "qwen2.5:7b" not in sonuc.stdout:
-                self.indirme_uyarisi_goster("Sistemin çevrimdışı çalışabilmesi için Qwen 2.5 (4.7 GB) modelinin indirilmesi gerekiyor.")
-        except FileNotFoundError:
-            QMessageBox.critical(self, "Kritik Eksiklik", "Sistemde 'Ollama' uygulaması bulunamadı!\nLütfen önce ollama.com adresinden indirip kurun.")
-        except Exception:
-            pass
-
-    def indirme_uyarisi_goster(self, mesaj):
-        kutu = QMessageBox(self)
-        kutu.setWindowTitle("Yerel Model Bulunamadı")
-        kutu.setIcon(QMessageBox.Warning)
-        kutu.setText(mesaj)
-        kutu.setInformativeText("Şimdi indirmek ister misiniz? (İndirme işlemi yeni bir komut penceresinde başlayacaktır).")
-        evet_btn = kutu.addButton("Evet, İndir", QMessageBox.AcceptRole)
-        kutu.addButton("Hayır, Sadece Çevrimiçi Kullanacağım", QMessageBox.RejectRole)
-        kutu.setStyleSheet("QLabel { color: black; }")
-        kutu.exec_()
-        if kutu.clickedButton() == evet_btn:
-            try:
-                subprocess.Popen(["cmd.exe", "/c", "start", "cmd.exe", "/k", "ollama pull qwen2.5:7b"])
-                self.sohbet_ekrani.append("\n⚠️ SİSTEM NOTU: Arka planda model indirmesi başlatıldı.\n")
-            except Exception as e:
-                self.sohbet_ekrani.append(f"❌ İndirme başlatılamadı: {e}")
 
     def tema_degistir(self):
         self.karanlik_mod_aktif = not self.karanlik_mod_aktif
@@ -308,12 +412,11 @@ class YerelAsistanApp(QMainWindow):
         soru = self.soru_girdisi.text().strip()
         if not soru or not self.belge_icerigi: return
         
-        # API Anahtarı Kontrolü
         girilen_api = self.api_girdisi.text().strip()
         gpt_aktif = self.openai_check.isChecked()
         
         if gpt_aktif and not girilen_api:
-            QMessageBox.warning(self, "API Anahtarı Eksik", "Çevrimiçi (Bulut) modunu kullanmak için sol panele geçerli bir API anahtarı girmelisiniz.\nAnahtarınız yoksa çevrimiçi modun işaretini kaldırın.")
+            QMessageBox.warning(self, "API Anahtarı Eksik", "Çevrimiçi (Bulut) modunu kullanmak için sol panele geçerli bir API anahtarı girmelisiniz.")
             return
 
         self.sohbet_ekrani.append(f"👤 Sen: {soru}")
