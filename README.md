@@ -42,10 +42,11 @@ Proje, son kullanıcı odaklı olarak derlenmiştir ve karmaşık kod kurulumlar
 * Sağ alt köşedeki girdi kutusuna belgelere dair sorunuzu yazın ve "Gönder" butonuna basın. Uygulama sizin için belgeyi analiz edip cevaplayacaktır.
 
 ## Örnek Ekran Görüntüleri
-*(Not: GitHub deponuza yüklediğiniz ekran görüntülerini buraya bağlayın)*
-* `![Açık Mod Ekranı](acik_mod_ekran.png)`
-* ![alt text](image.png)
-* `![API Entegrasyonu ve Model İndirme Uyarısı](pop_up_ekrani.png)`
+* ![Açık tema](image.png)
+* ![Koyu tema](image-1.png)
+* ![Ollama yok](image-2.png)
+* ![Mode yok](image-3.png)
+* ![Kullanıma hazır](image-4.png)
 
 ## Test Sonuçları
 * **Bağımlılık Yönetimi:** Modelin kurulu olmadığı temiz bir sistemde program çalıştırıldığında, pop-up tetikleyicisi başarılı bir şekilde devreye girmiş ve arka planda `ollama pull` komutunu çalıştırmıştır.
