@@ -53,3 +53,6 @@ Proje, son kullanıcı odaklı olarak derlenmiştir ve karmaşık kod kurulumlar
 * **Dosya Okuma:** 50 sayfalık PDF dosyaları, sürükle-bırak yöntemiyle 2 saniyenin altında hatasız şekilde ayrıştırılarak hafızaya alınmıştır.
 * **Akıllı API Yönlendirmesi:** Arayüze girilen Groq (`gsk_...`) şifresi ile sistem başarıyla Llama-3 modeline bağlanmış, 1 saniyenin altında gecikme ile (ücretsiz olarak) sonuç üretmiştir.
 * **Yerel Model Yanıt Süresi:** Çevrimdışı modda, harici GPU olmayan sistemlerde yanıt üretimi metin uzunluğuna bağlı olarak 1-2 dakika sürmüş, bu süreçte arayüz donmamış ve stabil kalmıştır.
+
+## Tanıtım Videosu
+* https://youtu.be/vx9wv778NkI
